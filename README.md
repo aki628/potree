@@ -110,6 +110,6 @@ npm start        # 監視 + ローカルサーバ
 
 ## 9. 関連ドキュメント
 
-- 詳細手順書: [docs/sample-ply-setup-ja.md](docs/sample-ply-setup-ja.md)
+- 詳細手順書: [docs/sample-las-setup-ja.md](docs/sample-las-setup-ja.md)
 - 公式 Potree リポジトリ: <https://github.com/potree/potree>
 - PotreeConverter: <https://github.com/potree/PotreeConverter>
