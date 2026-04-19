@@ -1,14 +1,14 @@
 # Potree（このリポジトリ）日本語 README
 
 このリポジトリは、WebGL ベースの点群ビューア **Potree** の開発用ソースです。
-本 README は、ローカルでの環境構築と、今回追加した `data/sample.ply` の実行確認手順に絞って日本語でまとめています。
+本 README は、ローカルでの環境構築と、今回追加した `data/sample.las` の実行確認手順に絞って日本語でまとめています。
 
 ## 1. 概要
 
 - 大規模点群をブラウザで表示するためのビューア
 - `npm start` でビルド監視 + ローカルサーバ起動
 - 追加サンプル: `examples/sample_ply_top_view.html`
-  - `data/sample.ply` を読み込み
+  - `data/sample.las` を読み込み
   - 自作平面（`custom_base_plane`）を追加
   - トップビュー（上面表示）で表示
 
@@ -59,7 +59,7 @@ npm start
 
 - `http://localhost:1234/examples/viewer.html`
 
-### 5.2 今回の `sample.ply` サンプル
+### 5.2 今回の `sample.las` サンプル
 
 - `http://localhost:1234/examples/sample_ply_top_view.html`
 
@@ -71,7 +71,7 @@ http://localhost:1234/examples/sample_ply_top_view.html?maxPoints=1200000&maxRea
 
 主なクエリパラメータ:
 
-- `file`: 読み込む PLY パス（既定: `../data/sample.ply`）
+- `file`: 読み込む LAS パス（既定: `../data/sample.las`）
 - `maxPoints`: 画面に保持する点数上限
 - `maxReadPoints`: 読み取る頂点数上限（`0` で全件）
 - `pointSize`: 点サイズ
@@ -80,7 +80,7 @@ http://localhost:1234/examples/sample_ply_top_view.html?maxPoints=1200000&maxRea
 
 以下を満たせば完了です。
 
-1. `data/sample.ply` をレンダリングできる
+1. `data/sample.las` をレンダリングできる
 2. 点群と自作平面（`custom_base_plane`）を同時表示できる
 3. トップビュー（上面表示）で確認できる
 
@@ -102,7 +102,7 @@ npm start        # 監視 + ローカルサーバ
 
 - `npm install` が失敗する（ネットワーク系）
   - 時間をおいて再試行
-- `sample.ply` が重い
+- `sample.las` が重い
   - `maxReadPoints` を小さくする（例: `2000000`）
   - `maxPoints` を下げる
 - 表示が荒い / 密すぎる

@@ -1,6 +1,6 @@
-# Potree 実行環境構築手順（`data/sample.ply` + 自作平面 + トップビュー）
+# Potree 実行環境構築手順（`data/sample.las` + 自作平面 + トップビュー）
 
-この手順書は、ローカル環境で Potree を起動し、`data/sample.ply` をレンダリングしたうえで、
+この手順書は、ローカル環境で Potree を起動し、`data/sample.las` をレンダリングしたうえで、
 自作の平面と点群を上面表示（トップビュー）できる状態を再現するためのものです。
 
 ## 1. 前提
@@ -8,14 +8,14 @@
 - OS: Linux / macOS / Windows (WSL 含む)
 - Node.js: 18 系（本リポジトリ検証時: `v18.19.0`）
 - npm: 9 系（本リポジトリ検証時: `9.2.0`）
-- リポジトリ直下に `data/sample.ply` が存在すること
+- リポジトリ直下に `data/sample.las` が存在すること
 
 確認コマンド:
 
 ```bash
 node -v
 npm -v
-ls -lh data/sample.ply
+ls -lh data/sample.las
 ```
 
 ## 2. 依存関係インストール
@@ -42,16 +42,16 @@ npm start
 
 起動後、`http://localhost:1234/examples/` を開きます。
 
-## 5. `sample.ply` + 平面 + トップビューの表示
+## 5. `sample.las` + 平面 + トップビューの表示
 
 ### 5.1 専用ページ
 
 - 直接URL: `http://localhost:1234/examples/sample_ply_top_view.html`
-- Examples 一覧から: `Sample PLY Top View`
+- Examples 一覧から: `Sample LAS Top View`
 
 ### 5.2 推奨パラメータ
 
-`sample.ply` は非常に大きいため、まずは以下で確認します。
+`sample.las` は非常に大きいため、まずは以下で確認します。
 
 - `maxPoints`: 画面に保持する点数上限
 - `maxReadPoints`: 読み取る頂点数上限（0 で全件走査）
@@ -73,7 +73,7 @@ http://localhost:1234/examples/sample_ply_top_view.html?maxPoints=1200000&maxRea
 
 以下をすべて満たしたら完了です。
 
-1. `data/sample.ply` をレンダリングできること
+1. `data/sample.las` をレンダリングできること
 - 判定方法: 画面左上ステータスが `Completed` になり、`rendered: ...` が 0 より大きい。
 
 2. 自作の平面と上記点群を同時表示できること
