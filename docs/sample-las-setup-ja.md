@@ -1,7 +1,8 @@
-# Potree 実行環境構築手順（`data/sample.las` + 自作平面 + トップビュー）
+# Potree 実行環境構築手順（`data/sample.las` + ラベル色分け + 自作平面 + トップビュー）
 
 この手順書は、ローカル環境で Potree を起動し、`data/sample.las` をレンダリングしたうえで、
-自作の平面と点群を上面表示（トップビュー）できる状態を再現するためのものです。
+ラベル（classification）ごとの色分け、表示/非表示切替、色編集 UI、
+自作の平面表示、上面表示（トップビュー）を再現するためのものです。
 
 ## 1. 前提
 
@@ -9,13 +10,14 @@
 - Node.js: 18 系（本リポジトリ検証時: `v18.19.0`）
 - npm: 9 系（本リポジトリ検証時: `9.2.0`）
 - リポジトリ直下に `data/sample.las` が存在すること
+- リポジトリ直下に `data/sample_labels.xml` が存在すること
 
 確認コマンド:
 
 ```bash
 node -v
 npm -v
-ls -lh data/sample.las
+ls -lh data/sample.las data/sample_labels.xml
 ```
 
 ## 2. 依存関係インストール
@@ -40,7 +42,7 @@ npm start
 
 起動後、`http://localhost:1234/examples/` を開きます。
 
-## 5. `sample.las` + 平面 + トップビューの表示
+## 5. `sample.las` + ラベル + 平面 + トップビューの表示
 
 ### 5.1 専用ページ
 
@@ -52,10 +54,12 @@ npm start
 - `maxPoints=0`（描画点数上限なし）
 - `maxReadPoints=0`（読み取り上限なし）
 - `chunkPoints=1000000`（1チャンクの点数）
+- `labelMap=../data/sample_labels.xml`（ラベル定義 XML）
 
 ### 5.3 パラメータ一覧
 
 - `file`: 読み込む LAS ファイルパス
+- `labelMap`: ラベルカラーマップ XML のパス
 - `maxPoints`: 描画点数上限（`0` で全点）
 - `maxReadPoints`: 読み取り点数上限（`0` で全件）
 - `chunkPoints`: チャンク点数（大きいほどオブジェクト数は減るがメモリ圧が上がる）
@@ -74,13 +78,22 @@ http://localhost:1234/examples/sample_las_top_view.html?maxPoints=3000000&maxRea
 1. `data/sample.las` をレンダリングできること
 - 判定方法: 左上ステータスが `Completed` になる。
 
-2. 自作の平面と上記点群を同時表示できること
+2. ラベルごとに色分け表示されること
+- 判定方法: 同じラベルの点が同色で描画される。
+
+3. ラベルごとの表示/非表示を切り替えられること
+- 判定方法: 右上 Labels パネルのチェックボックスで対象ラベルが消える/再表示される。
+
+4. ラベル色を UI で変更できること
+- 判定方法: ラベル行の色ボタンをクリックし、選択色が即時描画に反映される。
+
+5. 自作の平面と上記点群を同時表示できること
 - 判定方法: 半透明平面（`custom_base_plane`）が表示される。
 
-3. 上面表示（トップビュー）にできること
+6. 上面表示（トップビュー）にできること
 - 判定方法: 初期表示で上面視点になり、`Top View` で戻せる。
 
-4. 全点モードで `seen==rendered` が一致すること
+7. 全点モードで `seen==rendered` が一致すること
 - 判定方法: `maxPoints=0&maxReadPoints=0` で `seen==rendered: yes` が表示される。
 
 ## 7. 完了条件を満たすまでの修正ループ
@@ -88,8 +101,9 @@ http://localhost:1234/examples/sample_las_top_view.html?maxPoints=3000000&maxRea
 1. `npm run build` を再実行
 2. ブラウザをハードリロード
 3. 依然として重い場合は `chunkPoints` / `maxReadPoints` / `maxPoints` を調整
-4. ブラウザコンソールを確認し、`examples/sample_las_top_view.html` を修正
-5. 修正後に 1 へ戻る
+4. ラベル定義を変更したい場合は `data/sample_labels.xml` を修正して再読込
+5. ブラウザコンソールを確認し、`examples/sample_las_top_view.html` を修正
+6. 修正後に 1 へ戻る
 
 ## 8. トラブルシュート
 
@@ -98,12 +112,17 @@ http://localhost:1234/examples/sample_las_top_view.html?maxPoints=3000000&maxRea
 - 読み込みが遅い / メモリ負荷が高い
   - `chunkPoints` を小さくする
   - `maxReadPoints` / `maxPoints` に上限を設定する
+- ラベル色が期待通りでない
+  - `data/sample_labels.xml` の `color="#RRGGBB"` を確認
+  - XML 読み込み失敗時はフォールバック色になる
 - 画面が見づらい
   - `pointSize` を調整する
 
 ## 9. 関連ファイル
 
 - `examples/sample_las_top_view.html`
+- `data/sample_labels.xml`
 - `docs/adr/0001-las-full-rendering.md`
+- `docs/adr/0002-label-color-map-and-visibility.md`
 - `examples/page.json`
 - `examples/github.html`
