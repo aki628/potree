@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LabelColorMap name="ASPRS" version="1.0">
+  <Label id="0" name="Created, Never Classified" color="#a9a9a9" visible="true" />
+  <Label id="1" name="Unclassified" color="#f1f1f1" visible="true" />
+  <Label id="2" name="Ground" color="#d2b48c" visible="true" />
+  <Label id="3" name="Low Vegetation" color="#7fc97f" visible="true" />
+  <Label id="4" name="Medium Vegetation" color="#4daf4a" visible="true" />
+  <Label id="5" name="High Vegetation" color="#2e7d32" visible="true" />
+  <Label id="6" name="Building" color="#ff6f61" visible="true" />
+  <Label id="7" name="Low Point (Noise)" color="#9e9e9e" visible="true" />
+  <Label id="8" name="Model Key-point" color="#ffc107" visible="true" />
+  <Label id="9" name="Water" color="#42a5f5" visible="true" />
+  <Label id="10" name="Rail" color="#607d8b" visible="true" />
+  <Label id="11" name="Road Surface" color="#8d6e63" visible="true" />
+  <Label id="12" name="Overlap" color="#ab47bc" visible="true" />
+  <Label id="13" name="Wire - Guard" color="#ffd54f" visible="true" />
+  <Label id="14" name="Wire - Conductor" color="#ffca28" visible="true" />
+  <Label id="15" name="Transmission Tower" color="#795548" visible="true" />
+  <Label id="16" name="Wire-Structure Connector" color="#ffb300" visible="true" />
+  <Label id="17" name="Bridge Deck" color="#b388ff" visible="true" />
+  <Label id="18" name="High Noise" color="#ef5350" visible="true" />
+</LabelColorMap>

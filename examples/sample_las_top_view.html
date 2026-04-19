@@ -30,6 +30,107 @@
 			padding: 4px 8px;
 			cursor: pointer;
 		}
+
+		#label_panel {
+			position: absolute;
+			top: 12px;
+			right: 12px;
+			z-index: 1000;
+			width: min(360px, 48vw);
+			max-height: 72vh;
+			overflow: hidden;
+			padding: 10px 12px;
+			background: rgba(0, 0, 0, 0.55);
+			color: #fff;
+			font: 12px/1.4 monospace;
+			border-radius: 6px;
+			display: flex;
+			flex-direction: column;
+			gap: 8px;
+		}
+
+		#label_panel_header {
+			font-weight: 700;
+		}
+
+		#label_panel_meta {
+			font-size: 11px;
+			opacity: 0.9;
+			white-space: pre-wrap;
+		}
+
+		#label_legend_body {
+			overflow: auto;
+			padding-right: 4px;
+		}
+
+		.label_row {
+			display: grid;
+			grid-template-columns: auto 1fr auto;
+			gap: 8px;
+			align-items: center;
+			margin-bottom: 6px;
+		}
+
+		.label_toggle {
+			margin: 0;
+		}
+
+		.label_name {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.label_count {
+			opacity: 0.85;
+		}
+
+		.label_color_button {
+			display: inline-block;
+			width: 26px;
+			height: 18px;
+			border: 1px solid rgba(255, 255, 255, 0.65);
+			border-radius: 4px;
+			cursor: pointer;
+			padding: 0;
+			background: transparent;
+		}
+
+		.label_color_input {
+			position: absolute;
+			opacity: 0;
+			pointer-events: none;
+			width: 1px;
+			height: 1px;
+		}
+
+		.label_message {
+			opacity: 0.95;
+		}
+
+		@media (max-width: 1024px) {
+			#label_panel {
+				width: min(380px, 62vw);
+				max-height: 58vh;
+			}
+		}
+
+		@media (max-width: 720px) {
+			#status_panel,
+			#label_panel {
+				left: 10px;
+				right: 10px;
+				width: auto;
+				max-width: none;
+			}
+
+			#label_panel {
+				top: auto;
+				bottom: 10px;
+				max-height: 42vh;
+			}
+		}
 	</style>
 </head>
 
@@ -58,11 +159,20 @@
 		<button id="btn_top_view" type="button">Top View</button>
 	</div>
 
+	<div id="label_panel">
+		<div id="label_panel_header">Labels</div>
+		<div id="label_panel_meta">Loading label map...</div>
+		<div id="label_legend_body">
+			<div class="label_message">Loading...</div>
+		</div>
+	</div>
+
 	<script type="module">
 		import * as THREE from "../libs/three.js/build/three.module.js";
 
 		const params = new URLSearchParams(window.location.search);
 		const samplePath = params.get("file") || "../data/sample.las";
+		const labelMapPath = params.get("labelMap") || "../data/sample_labels.xml";
 		const maxPointsParam = Number(params.get("maxPoints") || "0");
 		const maxReadPointsParam = Number(params.get("maxReadPoints") || "0");
 		const pointSize = Number(params.get("pointSize") || "0.015");
@@ -79,11 +189,24 @@
 
 		const statusText = document.getElementById("status_text");
 		const topViewButton = document.getElementById("btn_top_view");
-
+		const labelPanelMeta = document.getElementById("label_panel_meta");
+		const labelLegendBody = document.getElementById("label_legend_body");
 		const fmt = new Intl.NumberFormat("en-US");
 
 		function setStatus(text){
 			statusText.textContent = text;
+		}
+
+		function setLabelPanelMeta(text){
+			labelPanelMeta.textContent = text;
+		}
+
+		function setLabelLegendMessage(text){
+			labelLegendBody.innerHTML = "";
+			const message = document.createElement("div");
+			message.className = "label_message";
+			message.textContent = text;
+			labelLegendBody.appendChild(message);
 		}
 
 		function concatUint8(left, right){
@@ -212,34 +335,150 @@
 			};
 		}
 
-		function getColorOffset(pointFormat){
-			switch (pointFormat) {
-				case 2:
-					return 20;
-				case 3:
-				case 5:
-					return 28;
-				case 7:
-				case 8:
-				case 10:
-					return 30;
-				default:
-					return -1;
+		function getClassificationOffset(pointFormat){
+			if (pointFormat >= 0 && pointFormat <= 5) {
+				return 15;
+			}
+			if (pointFormat >= 6 && pointFormat <= 10) {
+				return 16;
+			}
+			return -1;
+		}
+
+		function parseVisibility(value, fallback = true){
+			if (value === null || value === undefined) {
+				return fallback;
+			}
+			const normalized = String(value).trim().toLowerCase();
+			if (normalized === "") {
+				return fallback;
+			}
+			if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off") {
+				return false;
+			}
+			if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on") {
+				return true;
+			}
+			return fallback;
+		}
+
+		function normalizeHexColor(input, fallback){
+			if (typeof input !== "string") {
+				return fallback;
+			}
+
+			const trimmed = input.trim();
+			if (/^#[0-9a-fA-F]{6}$/.test(trimmed)) {
+				return `#${trimmed.slice(1).toLowerCase()}`;
+			}
+			if (/^#[0-9a-fA-F]{3}$/.test(trimmed)) {
+				const r = trimmed[1];
+				const g = trimmed[2];
+				const b = trimmed[3];
+				return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+			}
+
+			return fallback;
+		}
+
+		function getDeterministicColorHex(labelId){
+			const color = new THREE.Color();
+			const hue = (((labelId % 256) + 256) % 256) * 53 % 360;
+			color.setHSL(hue / 360, 0.68, 0.52);
+			return `#${color.getHexString()}`;
+		}
+
+		function createFallbackLabelDefinition(labelId){
+			return {
+				id: labelId,
+				name: `Class ${labelId}`,
+				color: getDeterministicColorHex(labelId),
+				visible: true,
+				source: "generated"
+			};
+		}
+
+		async function loadLabelDefinitions(url){
+			const definitions = new Map();
+
+			try {
+				const response = await fetch(url);
+				if (!response.ok) {
+					throw new Error(`Failed to fetch label map: ${response.status} ${response.statusText}`);
+				}
+
+				const xmlText = await response.text();
+				const xml = new DOMParser().parseFromString(xmlText, "application/xml");
+				if (xml.querySelector("parsererror")) {
+					throw new Error("Label map XML parse error.");
+				}
+
+				const nodes = [
+					...xml.querySelectorAll("Label"),
+					...xml.querySelectorAll("label"),
+					...xml.querySelectorAll("Class"),
+					...xml.querySelectorAll("class")
+				];
+
+				for (const node of nodes) {
+					const idRaw = node.getAttribute("id") ?? node.getAttribute("value");
+					if (idRaw === null) {
+						continue;
+					}
+
+					const id = Number(idRaw);
+					if (!Number.isInteger(id) || id < 0 || id > 255) {
+						continue;
+					}
+
+					const fallback = createFallbackLabelDefinition(id);
+					const nameRaw =
+						node.getAttribute("name") ??
+						node.getAttribute("label") ??
+						node.textContent ??
+						"";
+					const name = nameRaw.trim().length > 0 ? nameRaw.trim() : fallback.name;
+					const color = normalizeHexColor(
+						node.getAttribute("color") ?? node.getAttribute("hex") ?? "",
+						fallback.color
+					);
+					const visible = parseVisibility(node.getAttribute("visible"), true);
+
+					definitions.set(id, {
+						id,
+						name,
+						color,
+						visible,
+						source: "xml"
+					});
+				}
+
+				return {
+					definitions,
+					loadedFromXml: true,
+					errorMessage: "",
+					url
+				};
+			} catch (error) {
+				console.warn(error);
+				return {
+					definitions,
+					loadedFromXml: false,
+					errorMessage: error.message,
+					url
+				};
 			}
 		}
 
-		function toByteFromColor16(value){
-			return Math.max(0, Math.min(255, Math.round(value / 256)));
-		}
-
-		function createChunkedPointCollector(chunkCapacity, pointSizeValue){
+		function createLabelChunkCollector(labelDefinition, chunkCapacity, pointSizeValue){
 			const pointsGroup = new THREE.Group();
-			pointsGroup.name = "sample_las_points_group";
+			pointsGroup.name = `sample_las_label_${labelDefinition.id}`;
+			pointsGroup.visible = labelDefinition.visible;
 
-			const sharedMaterial = new THREE.PointsMaterial({
+			const material = new THREE.PointsMaterial({
 				size: pointSizeValue,
 				sizeAttenuation: true,
-				vertexColors: true
+				color: new THREE.Color(labelDefinition.color)
 			});
 
 			let chunkIndex = 0;
@@ -247,7 +486,6 @@
 			let writtenInChunk = 0;
 			let renderedPoints = 0;
 			let positions = new Float32Array(chunkCapacity * 3);
-			let colors = new Uint8Array(chunkCapacity * 3);
 
 			function flushChunk(){
 				if (writtenInChunk === 0) {
@@ -259,25 +497,20 @@
 					"position",
 					new THREE.BufferAttribute(positions.subarray(0, writtenInChunk * 3), 3)
 				);
-				geometry.setAttribute(
-					"color",
-					new THREE.BufferAttribute(colors.subarray(0, writtenInChunk * 3), 3, true)
-				);
 				geometry.computeBoundingBox();
 				geometry.computeBoundingSphere();
 
-				const points = new THREE.Points(geometry, sharedMaterial);
-				points.name = `sample_las_points_chunk_${chunkIndex++}`;
+				const points = new THREE.Points(geometry, material);
+				points.name = `sample_las_label_${labelDefinition.id}_chunk_${chunkIndex++}`;
 				pointsGroup.add(points);
 
 				renderedPoints += writtenInChunk;
 				chunkCount++;
 				writtenInChunk = 0;
 				positions = new Float32Array(chunkCapacity * 3);
-				colors = new Uint8Array(chunkCapacity * 3);
 			}
 
-			function appendPoint(x, y, z, r, g, b){
+			function appendPoint(x, y, z){
 				if (writtenInChunk >= chunkCapacity) {
 					flushChunk();
 				}
@@ -286,34 +519,193 @@
 				positions[i3 + 0] = x;
 				positions[i3 + 1] = y;
 				positions[i3 + 2] = z;
-				colors[i3 + 0] = r;
-				colors[i3 + 1] = g;
-				colors[i3 + 2] = b;
 				writtenInChunk++;
-			}
-
-			function getBufferedPoints(){
-				return renderedPoints + writtenInChunk;
 			}
 
 			function finalize(){
 				flushChunk();
 				return {
-					pointsGroup,
 					renderedPoints,
 					chunkCount
+				};
+			}
+
+			function setVisible(value){
+				pointsGroup.visible = !!value;
+			}
+
+			function isVisible(){
+				return pointsGroup.visible;
+			}
+
+			function setColor(hexColor){
+				material.color.set(hexColor);
+			}
+
+			function getColorHex(){
+				return `#${material.color.getHexString()}`;
+			}
+
+			return {
+				pointsGroup,
+				appendPoint,
+				finalize,
+				setVisible,
+				isVisible,
+				setColor,
+				getColorHex
+			};
+		}
+
+		function createLabelPointCollector(chunkCapacity, pointSizeValue, labelDefinitions){
+			const pointsGroup = new THREE.Group();
+			pointsGroup.name = "sample_las_points_group";
+			const labels = new Map();
+			let bufferedPoints = 0;
+
+			function getOrCreateLabel(labelId){
+				if (labels.has(labelId)) {
+					return labels.get(labelId);
+				}
+
+				if (!labelDefinitions.has(labelId)) {
+					labelDefinitions.set(labelId, createFallbackLabelDefinition(labelId));
+				}
+
+				const definition = labelDefinitions.get(labelId);
+				const collector = createLabelChunkCollector(definition, chunkCapacity, pointSizeValue);
+				pointsGroup.add(collector.pointsGroup);
+
+				const labelEntry = {
+					id: labelId,
+					definition,
+					collector,
+					seenPoints: 0
+				};
+
+				labels.set(labelId, labelEntry);
+				return labelEntry;
+			}
+
+			function appendPoint(x, y, z, labelId){
+				const label = getOrCreateLabel(labelId);
+				label.collector.appendPoint(x, y, z);
+				label.seenPoints++;
+				bufferedPoints++;
+			}
+
+			function getBufferedPoints(){
+				return bufferedPoints;
+			}
+
+			function getLabelCount(){
+				return labels.size;
+			}
+
+			function finalize(){
+				let renderedPoints = 0;
+				let chunkCount = 0;
+				const labelEntries = [];
+
+				for (const [labelId, entry] of labels) {
+					const finalized = entry.collector.finalize();
+					renderedPoints += finalized.renderedPoints;
+					chunkCount += finalized.chunkCount;
+
+					labelEntries.push({
+						id: labelId,
+						name: entry.definition.name,
+						color: entry.collector.getColorHex(),
+						visible: entry.collector.isVisible(),
+						seenPoints: entry.seenPoints,
+						renderedPoints: finalized.renderedPoints,
+						chunkCount: finalized.chunkCount,
+						setVisible: (value) => entry.collector.setVisible(value),
+						setColor: (hexColor) => entry.collector.setColor(hexColor)
+					});
+				}
+
+				labelEntries.sort((a, b) => a.id - b.id);
+
+				return {
+					pointsGroup,
+					renderedPoints,
+					chunkCount,
+					labelEntries
 				};
 			}
 
 			return {
 				appendPoint,
 				getBufferedPoints,
+				getLabelCount,
 				finalize
 			};
 		}
 
+		function renderLabelLegend(labelEntries){
+			if (!labelEntries || labelEntries.length === 0) {
+				setLabelLegendMessage("No labels detected in loaded points.");
+				return;
+			}
+
+			labelLegendBody.innerHTML = "";
+
+			for (const label of labelEntries) {
+				const row = document.createElement("div");
+				row.className = "label_row";
+
+				const toggle = document.createElement("input");
+				toggle.type = "checkbox";
+				toggle.className = "label_toggle";
+				toggle.checked = label.visible;
+				toggle.addEventListener("change", () => {
+					label.setVisible(toggle.checked);
+				});
+
+				const name = document.createElement("div");
+				name.className = "label_name";
+				name.title = `${label.name} (ID ${label.id})`;
+				name.textContent = `${label.name} [${label.id}] `;
+
+				const count = document.createElement("span");
+				count.className = "label_count";
+				count.textContent = `(${fmt.format(label.renderedPoints)})`;
+				name.appendChild(count);
+
+				const colorButton = document.createElement("button");
+				colorButton.type = "button";
+				colorButton.className = "label_color_button";
+				colorButton.style.backgroundColor = label.color;
+				colorButton.title = `Change color for ${label.name}`;
+
+				const colorInput = document.createElement("input");
+				colorInput.type = "color";
+				colorInput.className = "label_color_input";
+				colorInput.value = normalizeHexColor(label.color, "#ffffff");
+
+				colorButton.addEventListener("click", () => {
+					colorInput.click();
+				});
+
+				colorInput.addEventListener("input", () => {
+					const next = normalizeHexColor(colorInput.value, label.color);
+					label.color = next;
+					label.setColor(next);
+					colorButton.style.backgroundColor = next;
+				});
+
+				row.appendChild(toggle);
+				row.appendChild(name);
+				row.appendChild(colorButton);
+				row.appendChild(colorInput);
+
+				labelLegendBody.appendChild(row);
+			}
+		}
+
 		async function loadLasPoints(url, options){
-			const {pointLimit, readLimit, pointSize, chunkPoints} = options;
+			const {pointLimit, readLimit, pointSize, chunkPoints, labelDefinitions} = options;
 
 			const response = await fetch(url);
 			if (!response.ok) {
@@ -333,7 +725,7 @@
 			let seenVertices = 0;
 			let done = false;
 
-			const pointCollector = createChunkedPointCollector(chunkPoints, pointSize);
+			const pointCollector = createLabelPointCollector(chunkPoints, pointSize, labelDefinitions);
 			const bounds = {
 				minX: Number.POSITIVE_INFINITY,
 				minY: Number.POSITIVE_INFINITY,
@@ -363,7 +755,8 @@
 					`Reading ${url}${pct}\n` +
 					`${headerInfo}\n` +
 					`seen: ${fmt.format(seenVertices)}${declaredInfo}\n` +
-					`rendered: ${fmt.format(pointCollector.getBufferedPoints())} (${renderMode})`
+					`rendered: ${fmt.format(pointCollector.getBufferedPoints())} (${renderMode})\n` +
+					`labels: ${fmt.format(pointCollector.getLabelCount())}`
 				);
 			}
 
@@ -411,9 +804,8 @@
 				const consumableBytes = availableRecords * recordLength;
 				const recordBytes = pending.subarray(0, consumableBytes);
 				const dv = new DataView(recordBytes.buffer, recordBytes.byteOffset, recordBytes.byteLength);
-
-				const colorOffset = getColorOffset(header.pointFormat);
-				const withRgb = colorOffset >= 0 && recordLength >= colorOffset + 6;
+				const classificationOffset = getClassificationOffset(header.pointFormat);
+				const withClassification = classificationOffset >= 0 && recordLength > classificationOffset;
 
 				for (let recordIndex = 0; recordIndex < availableRecords; recordIndex++) {
 					if (readLimit > 0 && seenVertices >= readLimit) {
@@ -434,22 +826,10 @@
 					const x = xi * header.scaleX + header.offsetX;
 					const y = yi * header.scaleY + header.offsetY;
 					const z = zi * header.scaleZ + header.offsetZ;
-
-					let r = 255;
-					let g = 255;
-					let b = 255;
-
-					if (withRgb) {
-						const r16 = dv.getUint16(base + colorOffset + 0, true);
-						const g16 = dv.getUint16(base + colorOffset + 2, true);
-						const b16 = dv.getUint16(base + colorOffset + 4, true);
-						r = toByteFromColor16(r16);
-						g = toByteFromColor16(g16);
-						b = toByteFromColor16(b16);
-					}
+					const classification = withClassification ? dv.getUint8(base + classificationOffset, true) : 0;
 
 					seenVertices++;
-					pointCollector.appendPoint(x, y, z, r, g, b);
+					pointCollector.appendPoint(x, y, z, classification);
 					updateBounds(bounds, x, y, z);
 				}
 
@@ -479,7 +859,8 @@
 				seenVertices,
 				renderedPoints: finalResult.renderedPoints,
 				chunkCount: finalResult.chunkCount,
-				fullyReadToEof: done === false
+				fullyReadToEof: done === false,
+				labels: finalResult.labelEntries
 			};
 		}
 
@@ -492,6 +873,7 @@
 
 		viewer.setDescription(
 			`Rendering ${samplePath}<br>` +
+			`labelMap=${labelMapPath}<br>` +
 			`maxPoints=${pointLimit > 0 ? fmt.format(pointLimit) : "all"}, ` +
 			`maxReadPoints=${readLimit > 0 ? fmt.format(readLimit) : "all"}, ` +
 			`chunkPoints=${fmt.format(chunkPoints)}`
@@ -519,13 +901,32 @@
 		});
 
 		try {
+			setLabelPanelMeta(`Loading: ${labelMapPath}`);
+			setLabelLegendMessage("Preparing label map...");
+			const labelMapResult = await loadLabelDefinitions(labelMapPath);
+
+			if (labelMapResult.loadedFromXml) {
+				setLabelPanelMeta(
+					`source: xml\n` +
+					`path: ${labelMapResult.url}\n` +
+					`definitions: ${fmt.format(labelMapResult.definitions.size)}`
+				);
+			} else {
+				setLabelPanelMeta(
+					`source: fallback\n` +
+					`path: ${labelMapResult.url}\n` +
+					`error: ${labelMapResult.errorMessage || "none"}`
+				);
+			}
+
 			setStatus("Loading sample LAS...");
 
 			const result = await loadLasPoints(samplePath, {
 				pointLimit,
 				readLimit,
 				pointSize,
-				chunkPoints
+				chunkPoints,
+				labelDefinitions: labelMapResult.definitions
 			});
 
 			viewer.scene.scene.add(result.pointsGroup);
@@ -535,6 +936,13 @@
 
 			latestBounds = result.bounds;
 			applyTopView(viewer, result.bounds);
+
+			renderLabelLegend(result.labels);
+			setLabelPanelMeta(
+				`${labelMapResult.loadedFromXml ? "source: xml" : "source: fallback"}\n` +
+				`labels rendered: ${fmt.format(result.labels.length)}\n` +
+				`points rendered: ${fmt.format(result.renderedPoints)}`
+			);
 
 			const ranges = [
 				`x: ${toRangeString(result.bounds.minX, result.bounds.maxX)}`,
@@ -553,6 +961,7 @@
 				`LAS ${result.header.version} / format ${result.header.pointFormat} / record ${result.header.pointRecordLength}\n` +
 				`seen: ${fmt.format(result.seenVertices)} / header ${fmt.format(result.header.pointCount)}\n` +
 				`rendered: ${fmt.format(result.renderedPoints)} / chunks ${fmt.format(result.chunkCount)}\n` +
+				`labels: ${fmt.format(result.labels.length)}\n` +
 				`seen==rendered: ${seenEqualsRendered ? "yes" : "no"}` +
 				(fullMode ? ` / fullMode: yes` : ` / fullMode: no`) +
 				(headerMatchesSeen === null ? "" : ` / header==seen: ${headerMatchesSeen ? "yes" : "no"}`) +
@@ -561,6 +970,8 @@
 		} catch (error) {
 			console.error(error);
 			setStatus(`Failed: ${error.message}`);
+			setLabelPanelMeta(`source: error\n${error.message}`);
+			setLabelLegendMessage("Label controls unavailable due to load error.");
 		}
 	</script>
 </body>
