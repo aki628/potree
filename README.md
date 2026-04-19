@@ -7,7 +7,7 @@
 
 - 大規模点群をブラウザで表示するためのビューア
 - `npm start` でビルド監視 + ローカルサーバ起動
-- 追加サンプル: `examples/sample_ply_top_view.html`
+- 追加サンプル: `examples/sample_las_top_view.html`
   - `data/sample.las` を読み込み
   - 自作平面（`custom_base_plane`）を追加
   - トップビュー（上面表示）で表示
@@ -61,12 +61,12 @@ npm start
 
 ### 5.2 今回の `sample.las` サンプル
 
-- `http://localhost:1234/examples/sample_ply_top_view.html`
+- `http://localhost:1234/examples/sample_las_top_view.html`
 
 推奨パラメータ（初回確認）:
 
 ```text
-http://localhost:1234/examples/sample_ply_top_view.html?maxPoints=1200000&maxReadPoints=8000000&pointSize=0.015
+http://localhost:1234/examples/sample_las_top_view.html?maxPoints=1200000&maxReadPoints=8000000&pointSize=0.015
 ```
 
 主なクエリパラメータ:

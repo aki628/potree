@@ -46,7 +46,7 @@ npm start
 
 ### 5.1 専用ページ
 
-- 直接URL: `http://localhost:1234/examples/sample_ply_top_view.html`
+- 直接URL: `http://localhost:1234/examples/sample_las_top_view.html`
 - Examples 一覧から: `Sample LAS Top View`
 
 ### 5.2 推奨パラメータ
@@ -60,13 +60,13 @@ npm start
 初回確認例:
 
 ```text
-http://localhost:1234/examples/sample_ply_top_view.html?maxPoints=1200000&maxReadPoints=8000000&pointSize=0.015
+http://localhost:1234/examples/sample_las_top_view.html?maxPoints=1200000&maxReadPoints=8000000&pointSize=0.015
 ```
 
 全件走査したい場合の例（時間がかかります）:
 
 ```text
-http://localhost:1234/examples/sample_ply_top_view.html?maxPoints=1200000&maxReadPoints=0&pointSize=0.015
+http://localhost:1234/examples/sample_las_top_view.html?maxPoints=1200000&maxReadPoints=0&pointSize=0.015
 ```
 
 ## 6. 完了条件
@@ -90,7 +90,7 @@ http://localhost:1234/examples/sample_ply_top_view.html?maxPoints=1200000&maxRea
 1. `npm run build` を再実行
 2. ブラウザをハードリロード
 3. `maxReadPoints` / `maxPoints` を減らして再確認
-4. それでも失敗する場合はブラウザコンソールのエラーを確認し、`examples/sample_ply_top_view.html` を修正
+4. それでも失敗する場合はブラウザコンソールのエラーを確認し、`examples/sample_las_top_view.html` を修正
 5. 修正後に再度 1 へ戻る
 
 ## 8. トラブルシュート
@@ -104,6 +104,6 @@ http://localhost:1234/examples/sample_ply_top_view.html?maxPoints=1200000&maxRea
 
 ## 9. 関連ファイル
 
-- `examples/sample_ply_top_view.html`
+- `examples/sample_las_top_view.html`
 - `examples/page.json`
 - `examples/github.html`
