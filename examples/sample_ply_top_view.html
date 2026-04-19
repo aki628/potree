@@ -3,7 +3,7 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-	<title>Potree Sample PLY Top View</title>
+	<title>Potree Sample LAS Top View</title>
 
 	<link rel="stylesheet" type="text/css" href="../build/potree/potree.css">
 	<link rel="stylesheet" type="text/css" href="../libs/jquery-ui/jquery-ui.min.css">
@@ -17,7 +17,7 @@
 			top: 12px;
 			left: 12px;
 			z-index: 1000;
-			max-width: 520px;
+			max-width: 580px;
 			padding: 10px 12px;
 			background: rgba(0, 0, 0, 0.55);
 			color: #fff;
@@ -62,7 +62,7 @@
 		import * as THREE from "../libs/three.js/build/three.module.js";
 
 		const params = new URLSearchParams(window.location.search);
-		const samplePath = params.get("file") || "../data/sample.ply";
+		const samplePath = params.get("file") || "../data/sample.las";
 		const maxPoints = Number(params.get("maxPoints") || "1200000");
 		const maxReadPoints = Number(params.get("maxReadPoints") || "8000000");
 		const pointSize = Number(params.get("pointSize") || "0.015");
@@ -71,10 +71,18 @@
 		const topViewButton = document.getElementById("btn_top_view");
 
 		const fmt = new Intl.NumberFormat("en-US");
-		const clamp255 = value => Math.max(0, Math.min(255, value | 0));
 
 		function setStatus(text){
 			statusText.textContent = text;
+		}
+
+		function concatUint8(left, right){
+			if (left.length === 0) return right;
+			if (right.length === 0) return left;
+			const out = new Uint8Array(left.length + right.length);
+			out.set(left, 0);
+			out.set(right, left.length);
+			return out;
 		}
 
 		function updateBounds(bounds, x, y, z){
@@ -84,26 +92,6 @@
 			if (x > bounds.maxX) bounds.maxX = x;
 			if (y > bounds.maxY) bounds.maxY = y;
 			if (z > bounds.maxZ) bounds.maxZ = z;
-		}
-
-		function parseVertexLine(line){
-			const values = line.trim().split(/\s+/);
-			if (values.length < 3) {
-				return null;
-			}
-
-			const x = Number(values[0]);
-			const y = Number(values[1]);
-			const z = Number(values[2]);
-			const r = values.length > 3 ? clamp255(Number(values[3])) : 255;
-			const g = values.length > 4 ? clamp255(Number(values[4])) : 255;
-			const b = values.length > 5 ? clamp255(Number(values[5])) : 255;
-
-			if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-				return null;
-			}
-
-			return {x, y, z, r, g, b};
 		}
 
 		function toRangeString(minValue, maxValue){
@@ -145,7 +133,76 @@
 			return plane;
 		}
 
-		async function loadAsciiPlySubset(url, options){
+		function parseLasHeader(buffer){
+			if (buffer.length < 106) {
+				return null;
+			}
+
+			const dv = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+			const signature = String.fromCharCode(buffer[0], buffer[1], buffer[2], buffer[3]);
+			if (signature !== "LASF") {
+				throw new Error("Invalid LAS signature. Expected LASF.");
+			}
+
+			const versionMajor = dv.getUint8(24);
+			const versionMinor = dv.getUint8(25);
+			const headerSize = dv.getUint16(94, true);
+			const offsetToPointData = dv.getUint32(96, true);
+			const pointFormatRaw = dv.getUint8(104);
+			const pointFormat = pointFormatRaw & 0x3f;
+			const pointRecordLength = dv.getUint16(105, true);
+			const legacyPointCount = dv.getUint32(107, true);
+
+			if (buffer.length < Math.max(offsetToPointData, 255)) {
+				return {
+					version: `${versionMajor}.${versionMinor}`,
+					headerSize,
+					offsetToPointData,
+					pointFormat,
+					pointRecordLength,
+					pointCount: legacyPointCount,
+					scaleX: 0.001,
+					scaleY: 0.001,
+					scaleZ: 0.001,
+					offsetX: 0,
+					offsetY: 0,
+					offsetZ: 0
+				};
+			}
+
+			const pointCount64 = Number(dv.getBigUint64(247, true));
+			const scaleX = dv.getFloat64(131, true);
+			const scaleY = dv.getFloat64(139, true);
+			const scaleZ = dv.getFloat64(147, true);
+			const offsetX = dv.getFloat64(155, true);
+			const offsetY = dv.getFloat64(163, true);
+			const offsetZ = dv.getFloat64(171, true);
+
+			return {
+				version: `${versionMajor}.${versionMinor}`,
+				headerSize,
+				offsetToPointData,
+				pointFormat,
+				pointRecordLength,
+				pointCount: pointCount64 > 0 ? pointCount64 : legacyPointCount,
+				scaleX,
+				scaleY,
+				scaleZ,
+				offsetX,
+				offsetY,
+				offsetZ
+			};
+		}
+
+		function formatHasRgb(pointFormat){
+			return [2, 3, 5, 7, 8, 10].includes(pointFormat);
+		}
+
+		function toByteFromColor16(value){
+			return Math.max(0, Math.min(255, Math.round(value / 256)));
+		}
+
+		async function loadLasSubset(url, options){
 			const {maxPoints, maxReadPoints, pointSize} = options;
 
 			const response = await fetch(url);
@@ -158,11 +215,11 @@
 
 			const totalBytes = Number(response.headers.get("content-length") || "0");
 			const reader = response.body.getReader();
-			const decoder = new TextDecoder("utf-8");
-			let buffer = "";
+
+			let pending = new Uint8Array(0);
 			let bytesRead = 0;
-			let headerDone = false;
-			let declaredVertices = 0;
+			let header = null;
+			let headerCandidate = null;
 			let seenVertices = 0;
 			let sampledVertices = 0;
 			let done = false;
@@ -187,69 +244,17 @@
 				lastStatusAt = now;
 
 				const pct = totalBytes > 0 ? ` ${(bytesRead / totalBytes * 100).toFixed(1)}%` : "";
-				const declaredInfo = declaredVertices > 0 ? ` / header ${fmt.format(declaredVertices)}` : "";
+				const headerInfo = header
+					? `LAS ${header.version} / fmt ${header.pointFormat} / record ${header.pointRecordLength}`
+					: "LAS header: parsing";
+				const declaredInfo = header && header.pointCount > 0 ? ` / header ${fmt.format(header.pointCount)}` : "";
 				setStatus(
 					`Reading ${url}${pct}\n` +
+					`${headerInfo}\n` +
 					`seen: ${fmt.format(seenVertices)}${declaredInfo}\n` +
 					`rendering: ${fmt.format(sampledVertices)} / cap ${fmt.format(maxPoints)}`
 				);
 			}
-
-			const processLine = (line) => {
-				if (!headerDone) {
-					if (line.startsWith("element vertex")) {
-						const parts = line.trim().split(/\s+/);
-						const parsed = Number(parts[2]);
-						if (Number.isFinite(parsed) && parsed > 0) {
-							declaredVertices = parsed;
-						}
-					}
-					if (line.trim() === "end_header") {
-						headerDone = true;
-					}
-					return;
-				}
-
-				if (!line.trim()) {
-					return;
-				}
-
-				seenVertices++;
-				if (maxReadPoints > 0 && seenVertices > maxReadPoints) {
-					done = true;
-					return;
-				}
-
-				let targetIndex = -1;
-				if (sampledVertices < maxPoints) {
-					targetIndex = sampledVertices;
-					sampledVertices++;
-				} else {
-					const replaceIndex = Math.floor(Math.random() * seenVertices);
-					if (replaceIndex < maxPoints) {
-						targetIndex = replaceIndex;
-					}
-				}
-
-				if (targetIndex < 0) {
-					return;
-				}
-
-				const point = parseVertexLine(line);
-				if (!point) {
-					return;
-				}
-
-				updateBounds(bounds, point.x, point.y, point.z);
-
-				const i3 = targetIndex * 3;
-				positions[i3 + 0] = point.x;
-				positions[i3 + 1] = point.y;
-				positions[i3 + 2] = point.z;
-				colors[i3 + 0] = point.r;
-				colors[i3 + 1] = point.g;
-				colors[i3 + 2] = point.b;
-			};
 
 			while (!done) {
 				const {value, done: streamDone} = await reader.read();
@@ -258,35 +263,117 @@
 				}
 
 				bytesRead += value.byteLength;
-				buffer += decoder.decode(value, {stream: true});
+				pending = concatUint8(pending, value);
 
-				let splitAt = buffer.indexOf("\n");
-				while (splitAt >= 0) {
-					const line = buffer.slice(0, splitAt).replace(/\r$/, "");
-					buffer = buffer.slice(splitAt + 1);
-					processLine(line);
-					if (done) {
-						break;
+				if (!header) {
+					if (!headerCandidate) {
+						headerCandidate = parseLasHeader(pending);
 					}
-					splitAt = buffer.indexOf("\n");
+
+					if (headerCandidate && pending.length >= headerCandidate.offsetToPointData) {
+						header = parseLasHeader(pending);
+
+						if (!header || header.pointRecordLength <= 0) {
+							throw new Error("Invalid LAS header: point record length is zero.");
+						}
+
+						if (header.pointFormat > 10) {
+							throw new Error(`Unsupported LAS point format: ${header.pointFormat}`);
+						}
+
+						pending = pending.subarray(header.offsetToPointData);
+					}
 				}
 
+				if (!header) {
+					maybeUpdateStatus(false);
+					continue;
+				}
+
+				const recordLength = header.pointRecordLength;
+				const availableRecords = Math.floor(pending.length / recordLength);
+				if (availableRecords === 0) {
+					maybeUpdateStatus(false);
+					continue;
+				}
+
+				const consumableBytes = availableRecords * recordLength;
+				const recordBytes = pending.subarray(0, consumableBytes);
+				const dv = new DataView(recordBytes.buffer, recordBytes.byteOffset, recordBytes.byteLength);
+				const withRgb = formatHasRgb(header.pointFormat);
+
+				for (let recordIndex = 0; recordIndex < availableRecords; recordIndex++) {
+					if (maxReadPoints > 0 && seenVertices >= maxReadPoints) {
+						done = true;
+						break;
+					}
+
+					const base = recordIndex * recordLength;
+					const xi = dv.getInt32(base + 0, true);
+					const yi = dv.getInt32(base + 4, true);
+					const zi = dv.getInt32(base + 8, true);
+
+					const x = xi * header.scaleX + header.offsetX;
+					const y = yi * header.scaleY + header.offsetY;
+					const z = zi * header.scaleZ + header.offsetZ;
+
+					let r = 255;
+					let g = 255;
+					let b = 255;
+
+					if (withRgb && recordLength >= 36) {
+						const r16 = dv.getUint16(base + 30, true);
+						const g16 = dv.getUint16(base + 32, true);
+						const b16 = dv.getUint16(base + 34, true);
+						r = toByteFromColor16(r16);
+						g = toByteFromColor16(g16);
+						b = toByteFromColor16(b16);
+					}
+
+					seenVertices++;
+
+					let targetIndex = -1;
+					if (sampledVertices < maxPoints) {
+						targetIndex = sampledVertices;
+						sampledVertices++;
+					} else {
+						const replaceIndex = Math.floor(Math.random() * seenVertices);
+						if (replaceIndex < maxPoints) {
+							targetIndex = replaceIndex;
+						}
+					}
+
+					if (targetIndex < 0) {
+						continue;
+					}
+
+					updateBounds(bounds, x, y, z);
+
+					const i3 = targetIndex * 3;
+					positions[i3 + 0] = x;
+					positions[i3 + 1] = y;
+					positions[i3 + 2] = z;
+					colors[i3 + 0] = r;
+					colors[i3 + 1] = g;
+					colors[i3 + 2] = b;
+				}
+
+				pending = pending.subarray(consumableBytes);
 				maybeUpdateStatus(false);
 			}
 
 			if (done) {
 				await reader.cancel();
-			} else {
-				buffer += decoder.decode();
-				if (buffer.trim()) {
-					processLine(buffer);
-				}
 			}
 
 			maybeUpdateStatus(true);
 
+			if (!header) {
+				throw new Error("LAS header was not parsed. File may be incomplete.");
+			}
+
 			if (sampledVertices === 0) {
-				throw new Error("No vertices were loaded from the PLY file.");
+				throw new Error("No points were loaded from the LAS file.");
 			}
 
 			const drawPositions = positions.subarray(0, sampledVertices * 3);
@@ -304,14 +391,14 @@
 				vertexColors: true
 			});
 			const points = new THREE.Points(geometry, material);
-			points.name = "sample_ply_points";
+			points.name = "sample_las_points";
 
 			return {
 				points,
 				bounds,
+				header,
 				seenVertices,
-				sampledVertices,
-				declaredVertices
+				sampledVertices
 			};
 		}
 
@@ -349,9 +436,9 @@
 		});
 
 		try {
-			setStatus("Loading sample PLY...");
+			setStatus("Loading sample LAS...");
 
-			const result = await loadAsciiPlySubset(samplePath, {
+			const result = await loadLasSubset(samplePath, {
 				maxPoints,
 				maxReadPoints,
 				pointSize
@@ -373,7 +460,8 @@
 
 			setStatus(
 				`Completed\n` +
-				`seen: ${fmt.format(result.seenVertices)} / header ${fmt.format(result.declaredVertices)}\n` +
+				`LAS ${result.header.version} / format ${result.header.pointFormat} / record ${result.header.pointRecordLength}\n` +
+				`seen: ${fmt.format(result.seenVertices)} / header ${fmt.format(result.header.pointCount)}\n` +
 				`rendered: ${fmt.format(result.sampledVertices)}\n` +
 				`${ranges.join(" | ")}`
 			);
