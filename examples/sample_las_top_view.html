@@ -17,7 +17,7 @@
 			top: 12px;
 			left: 12px;
 			z-index: 1000;
-			max-width: 580px;
+			max-width: 620px;
 			padding: 10px 12px;
 			background: rgba(0, 0, 0, 0.55);
 			color: #fff;
@@ -63,9 +63,19 @@
 
 		const params = new URLSearchParams(window.location.search);
 		const samplePath = params.get("file") || "../data/sample.las";
-		const maxPoints = Number(params.get("maxPoints") || "1200000");
-		const maxReadPoints = Number(params.get("maxReadPoints") || "8000000");
+		const maxPointsParam = Number(params.get("maxPoints") || "0");
+		const maxReadPointsParam = Number(params.get("maxReadPoints") || "0");
 		const pointSize = Number(params.get("pointSize") || "0.015");
+		const chunkPoints = Math.max(50000, Number(params.get("chunkPoints") || "1000000"));
+
+		const pointLimit = Number.isFinite(maxPointsParam) && maxPointsParam > 0
+			? Math.floor(maxPointsParam)
+			: 0;
+		const readLimit = Number.isFinite(maxReadPointsParam) && maxReadPointsParam > 0
+			? Math.floor(maxReadPointsParam)
+			: 0;
+		const fullRenderMode = pointLimit === 0;
+		const fullReadMode = readLimit === 0;
 
 		const statusText = document.getElementById("status_text");
 		const topViewButton = document.getElementById("btn_top_view");
@@ -134,7 +144,7 @@
 		}
 
 		function parseLasHeader(buffer){
-			if (buffer.length < 106) {
+			if (buffer.length < 227) {
 				return null;
 			}
 
@@ -153,7 +163,7 @@
 			const pointRecordLength = dv.getUint16(105, true);
 			const legacyPointCount = dv.getUint32(107, true);
 
-			if (buffer.length < Math.max(offsetToPointData, 255)) {
+			if (buffer.length < headerSize) {
 				return {
 					version: `${versionMajor}.${versionMinor}`,
 					headerSize,
@@ -170,7 +180,6 @@
 				};
 			}
 
-			const pointCount64 = Number(dv.getBigUint64(247, true));
 			const scaleX = dv.getFloat64(131, true);
 			const scaleY = dv.getFloat64(139, true);
 			const scaleZ = dv.getFloat64(147, true);
@@ -178,13 +187,22 @@
 			const offsetY = dv.getFloat64(163, true);
 			const offsetZ = dv.getFloat64(171, true);
 
+			let pointCount = legacyPointCount;
+			const supportsPointCount64 = versionMajor > 1 || (versionMajor === 1 && versionMinor >= 4);
+			if (supportsPointCount64 && buffer.length >= 255) {
+				const count64 = Number(dv.getBigUint64(247, true));
+				if (count64 > 0) {
+					pointCount = count64;
+				}
+			}
+
 			return {
 				version: `${versionMajor}.${versionMinor}`,
 				headerSize,
 				offsetToPointData,
 				pointFormat,
 				pointRecordLength,
-				pointCount: pointCount64 > 0 ? pointCount64 : legacyPointCount,
+				pointCount,
 				scaleX,
 				scaleY,
 				scaleZ,
@@ -194,16 +212,108 @@
 			};
 		}
 
-		function formatHasRgb(pointFormat){
-			return [2, 3, 5, 7, 8, 10].includes(pointFormat);
+		function getColorOffset(pointFormat){
+			switch (pointFormat) {
+				case 2:
+					return 20;
+				case 3:
+				case 5:
+					return 28;
+				case 7:
+				case 8:
+				case 10:
+					return 30;
+				default:
+					return -1;
+			}
 		}
 
 		function toByteFromColor16(value){
 			return Math.max(0, Math.min(255, Math.round(value / 256)));
 		}
 
-		async function loadLasSubset(url, options){
-			const {maxPoints, maxReadPoints, pointSize} = options;
+		function createChunkedPointCollector(chunkCapacity, pointSizeValue){
+			const pointsGroup = new THREE.Group();
+			pointsGroup.name = "sample_las_points_group";
+
+			const sharedMaterial = new THREE.PointsMaterial({
+				size: pointSizeValue,
+				sizeAttenuation: true,
+				vertexColors: true
+			});
+
+			let chunkIndex = 0;
+			let chunkCount = 0;
+			let writtenInChunk = 0;
+			let renderedPoints = 0;
+			let positions = new Float32Array(chunkCapacity * 3);
+			let colors = new Uint8Array(chunkCapacity * 3);
+
+			function flushChunk(){
+				if (writtenInChunk === 0) {
+					return;
+				}
+
+				const geometry = new THREE.BufferGeometry();
+				geometry.setAttribute(
+					"position",
+					new THREE.BufferAttribute(positions.subarray(0, writtenInChunk * 3), 3)
+				);
+				geometry.setAttribute(
+					"color",
+					new THREE.BufferAttribute(colors.subarray(0, writtenInChunk * 3), 3, true)
+				);
+				geometry.computeBoundingBox();
+				geometry.computeBoundingSphere();
+
+				const points = new THREE.Points(geometry, sharedMaterial);
+				points.name = `sample_las_points_chunk_${chunkIndex++}`;
+				pointsGroup.add(points);
+
+				renderedPoints += writtenInChunk;
+				chunkCount++;
+				writtenInChunk = 0;
+				positions = new Float32Array(chunkCapacity * 3);
+				colors = new Uint8Array(chunkCapacity * 3);
+			}
+
+			function appendPoint(x, y, z, r, g, b){
+				if (writtenInChunk >= chunkCapacity) {
+					flushChunk();
+				}
+
+				const i3 = writtenInChunk * 3;
+				positions[i3 + 0] = x;
+				positions[i3 + 1] = y;
+				positions[i3 + 2] = z;
+				colors[i3 + 0] = r;
+				colors[i3 + 1] = g;
+				colors[i3 + 2] = b;
+				writtenInChunk++;
+			}
+
+			function getBufferedPoints(){
+				return renderedPoints + writtenInChunk;
+			}
+
+			function finalize(){
+				flushChunk();
+				return {
+					pointsGroup,
+					renderedPoints,
+					chunkCount
+				};
+			}
+
+			return {
+				appendPoint,
+				getBufferedPoints,
+				finalize
+			};
+		}
+
+		async function loadLasPoints(url, options){
+			const {pointLimit, readLimit, pointSize, chunkPoints} = options;
 
 			const response = await fetch(url);
 			if (!response.ok) {
@@ -221,11 +331,9 @@
 			let header = null;
 			let headerCandidate = null;
 			let seenVertices = 0;
-			let sampledVertices = 0;
 			let done = false;
 
-			const positions = new Float32Array(maxPoints * 3);
-			const colors = new Uint8Array(maxPoints * 3);
+			const pointCollector = createChunkedPointCollector(chunkPoints, pointSize);
 			const bounds = {
 				minX: Number.POSITIVE_INFINITY,
 				minY: Number.POSITIVE_INFINITY,
@@ -248,11 +356,14 @@
 					? `LAS ${header.version} / fmt ${header.pointFormat} / record ${header.pointRecordLength}`
 					: "LAS header: parsing";
 				const declaredInfo = header && header.pointCount > 0 ? ` / header ${fmt.format(header.pointCount)}` : "";
+				const renderMode = pointLimit > 0
+					? `capped at ${fmt.format(pointLimit)}`
+					: "full render";
 				setStatus(
 					`Reading ${url}${pct}\n` +
 					`${headerInfo}\n` +
 					`seen: ${fmt.format(seenVertices)}${declaredInfo}\n` +
-					`rendering: ${fmt.format(sampledVertices)} / cap ${fmt.format(maxPoints)}`
+					`rendered: ${fmt.format(pointCollector.getBufferedPoints())} (${renderMode})`
 				);
 			}
 
@@ -300,10 +411,17 @@
 				const consumableBytes = availableRecords * recordLength;
 				const recordBytes = pending.subarray(0, consumableBytes);
 				const dv = new DataView(recordBytes.buffer, recordBytes.byteOffset, recordBytes.byteLength);
-				const withRgb = formatHasRgb(header.pointFormat);
+
+				const colorOffset = getColorOffset(header.pointFormat);
+				const withRgb = colorOffset >= 0 && recordLength >= colorOffset + 6;
 
 				for (let recordIndex = 0; recordIndex < availableRecords; recordIndex++) {
-					if (maxReadPoints > 0 && seenVertices >= maxReadPoints) {
+					if (readLimit > 0 && seenVertices >= readLimit) {
+						done = true;
+						break;
+					}
+
+					if (pointLimit > 0 && pointCollector.getBufferedPoints() >= pointLimit) {
 						done = true;
 						break;
 					}
@@ -321,41 +439,18 @@
 					let g = 255;
 					let b = 255;
 
-					if (withRgb && recordLength >= 36) {
-						const r16 = dv.getUint16(base + 30, true);
-						const g16 = dv.getUint16(base + 32, true);
-						const b16 = dv.getUint16(base + 34, true);
+					if (withRgb) {
+						const r16 = dv.getUint16(base + colorOffset + 0, true);
+						const g16 = dv.getUint16(base + colorOffset + 2, true);
+						const b16 = dv.getUint16(base + colorOffset + 4, true);
 						r = toByteFromColor16(r16);
 						g = toByteFromColor16(g16);
 						b = toByteFromColor16(b16);
 					}
 
 					seenVertices++;
-
-					let targetIndex = -1;
-					if (sampledVertices < maxPoints) {
-						targetIndex = sampledVertices;
-						sampledVertices++;
-					} else {
-						const replaceIndex = Math.floor(Math.random() * seenVertices);
-						if (replaceIndex < maxPoints) {
-							targetIndex = replaceIndex;
-						}
-					}
-
-					if (targetIndex < 0) {
-						continue;
-					}
-
+					pointCollector.appendPoint(x, y, z, r, g, b);
 					updateBounds(bounds, x, y, z);
-
-					const i3 = targetIndex * 3;
-					positions[i3 + 0] = x;
-					positions[i3 + 1] = y;
-					positions[i3 + 2] = z;
-					colors[i3 + 0] = r;
-					colors[i3 + 1] = g;
-					colors[i3 + 2] = b;
 				}
 
 				pending = pending.subarray(consumableBytes);
@@ -372,46 +467,34 @@
 				throw new Error("LAS header was not parsed. File may be incomplete.");
 			}
 
-			if (sampledVertices === 0) {
+			const finalResult = pointCollector.finalize();
+			if (finalResult.renderedPoints === 0) {
 				throw new Error("No points were loaded from the LAS file.");
 			}
 
-			const drawPositions = positions.subarray(0, sampledVertices * 3);
-			const drawColors = colors.subarray(0, sampledVertices * 3);
-
-			const geometry = new THREE.BufferGeometry();
-			geometry.setAttribute("position", new THREE.BufferAttribute(drawPositions, 3));
-			geometry.setAttribute("color", new THREE.BufferAttribute(drawColors, 3, true));
-			geometry.computeBoundingBox();
-			geometry.computeBoundingSphere();
-
-			const material = new THREE.PointsMaterial({
-				size: pointSize,
-				sizeAttenuation: true,
-				vertexColors: true
-			});
-			const points = new THREE.Points(geometry, material);
-			points.name = "sample_las_points";
-
 			return {
-				points,
+				pointsGroup: finalResult.pointsGroup,
 				bounds,
 				header,
 				seenVertices,
-				sampledVertices
+				renderedPoints: finalResult.renderedPoints,
+				chunkCount: finalResult.chunkCount,
+				fullyReadToEof: done === false
 			};
 		}
 
 		window.viewer = new Potree.Viewer(document.getElementById("potree_render_area"));
 		viewer.setEDLEnabled(false);
 		viewer.setFOV(60);
-		viewer.setPointBudget(5_000_000);
+		viewer.setPointBudget(10_000_000);
 		viewer.setBackground("skybox");
 		viewer.loadSettingsFromURL();
 
 		viewer.setDescription(
 			`Rendering ${samplePath}<br>` +
-			`maxPoints=${fmt.format(maxPoints)}, maxReadPoints=${fmt.format(maxReadPoints)}`
+			`maxPoints=${pointLimit > 0 ? fmt.format(pointLimit) : "all"}, ` +
+			`maxReadPoints=${readLimit > 0 ? fmt.format(readLimit) : "all"}, ` +
+			`chunkPoints=${fmt.format(chunkPoints)}`
 		);
 
 		viewer.loadGUI(() => {
@@ -438,13 +521,14 @@
 		try {
 			setStatus("Loading sample LAS...");
 
-			const result = await loadLasSubset(samplePath, {
-				maxPoints,
-				maxReadPoints,
-				pointSize
+			const result = await loadLasPoints(samplePath, {
+				pointLimit,
+				readLimit,
+				pointSize,
+				chunkPoints
 			});
 
-			viewer.scene.scene.add(result.points);
+			viewer.scene.scene.add(result.pointsGroup);
 
 			const basePlane = createPlane(result.bounds);
 			viewer.scene.scene.add(basePlane);
@@ -458,12 +542,21 @@
 				`z: ${toRangeString(result.bounds.minZ, result.bounds.maxZ)}`
 			];
 
+			const fullMode = fullRenderMode && fullReadMode;
+			const seenEqualsRendered = result.seenVertices === result.renderedPoints;
+			const headerMatchesSeen = result.header.pointCount > 0
+				? result.header.pointCount === result.seenVertices
+				: null;
+
 			setStatus(
 				`Completed\n` +
 				`LAS ${result.header.version} / format ${result.header.pointFormat} / record ${result.header.pointRecordLength}\n` +
 				`seen: ${fmt.format(result.seenVertices)} / header ${fmt.format(result.header.pointCount)}\n` +
-				`rendered: ${fmt.format(result.sampledVertices)}\n` +
-				`${ranges.join(" | ")}`
+				`rendered: ${fmt.format(result.renderedPoints)} / chunks ${fmt.format(result.chunkCount)}\n` +
+				`seen==rendered: ${seenEqualsRendered ? "yes" : "no"}` +
+				(fullMode ? ` / fullMode: yes` : ` / fullMode: no`) +
+				(headerMatchesSeen === null ? "" : ` / header==seen: ${headerMatchesSeen ? "yes" : "no"}`) +
+				`\n${ranges.join(" | ")}`
 			);
 		} catch (error) {
 			console.error(error);
