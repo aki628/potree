@@ -38,7 +38,8 @@
 		{"thumb": "thumbnails/cesium_sorvilier.png", "label": "Cesium Sorvilier", "url": "cesium_sorvilier.html"},
 		{"thumb": "thumbnails/custom_sidebar_section.png", "label": "Custom Sidebar Section", "url": "custom_sidebar_section.html"},
 		{"thumb": "thumbnails/embedded_iframe.png", "label": "Embedded Iframe", "url": "embedded_iframe.html"},
-		{"thumb": "thumbnails/gradient_colors.png", "label": "Gradient Colors", "url": "gradient_colors.html"}
+		{"thumb": "thumbnails/gradient_colors.png", "label": "Gradient Colors", "url": "gradient_colors.html"},
+		{"thumb": "thumbnails/viewer.png", "label": "Sample PLY Top View", "url": "sample_ply_top_view.html"}
 	],
 	"VR": [
 		{"thumb": "thumbnails/heidentor.jpg", "label": "Heidentor", "url": "vr_heidentor.html"},
