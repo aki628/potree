@@ -28,8 +28,6 @@ npm install
 
 ## 3. ビルド（必要時）
 
-`examples/page.json` などを更新した後は再ビルドします。
-
 ```bash
 npm run build
 ```
@@ -49,24 +47,24 @@ npm start
 - 直接URL: `http://localhost:1234/examples/sample_las_top_view.html`
 - Examples 一覧から: `Sample LAS Top View`
 
-### 5.2 推奨パラメータ
+### 5.2 既定パラメータ（全点モード）
 
-`sample.las` は非常に大きいため、まずは以下で確認します。
+- `maxPoints=0`（描画点数上限なし）
+- `maxReadPoints=0`（読み取り上限なし）
+- `chunkPoints=1000000`（1チャンクの点数）
 
-- `maxPoints`: 画面に保持する点数上限
-- `maxReadPoints`: 読み取る頂点数上限（0 で全件走査）
-- `pointSize`: 描画点サイズ
+### 5.3 パラメータ一覧
 
-初回確認例:
+- `file`: 読み込む LAS ファイルパス
+- `maxPoints`: 描画点数上限（`0` で全点）
+- `maxReadPoints`: 読み取り点数上限（`0` で全件）
+- `chunkPoints`: チャンク点数（大きいほどオブジェクト数は減るがメモリ圧が上がる）
+- `pointSize`: 点サイズ
+
+負荷を抑えたい場合の例:
 
 ```text
-http://localhost:1234/examples/sample_las_top_view.html?maxPoints=1200000&maxReadPoints=8000000&pointSize=0.015
-```
-
-全件走査したい場合の例（時間がかかります）:
-
-```text
-http://localhost:1234/examples/sample_las_top_view.html?maxPoints=1200000&maxReadPoints=0&pointSize=0.015
+http://localhost:1234/examples/sample_las_top_view.html?maxPoints=3000000&maxReadPoints=3000000&chunkPoints=500000&pointSize=0.015
 ```
 
 ## 6. 完了条件
@@ -74,36 +72,38 @@ http://localhost:1234/examples/sample_las_top_view.html?maxPoints=1200000&maxRea
 以下をすべて満たしたら完了です。
 
 1. `data/sample.las` をレンダリングできること
-- 判定方法: 画面左上ステータスが `Completed` になり、`rendered: ...` が 0 より大きい。
+- 判定方法: 左上ステータスが `Completed` になる。
 
 2. 自作の平面と上記点群を同時表示できること
-- 判定方法: 点群に加えて、半透明の平面（`custom_base_plane`）が表示される。
+- 判定方法: 半透明平面（`custom_base_plane`）が表示される。
 
 3. 上面表示（トップビュー）にできること
-- 判定方法: 初期表示で上面視点になっていること。
-- 補助確認: 左上 `Top View` ボタンで再度上面視点に戻せること。
+- 判定方法: 初期表示で上面視点になり、`Top View` で戻せる。
+
+4. 全点モードで `seen==rendered` が一致すること
+- 判定方法: `maxPoints=0&maxReadPoints=0` で `seen==rendered: yes` が表示される。
 
 ## 7. 完了条件を満たすまでの修正ループ
 
-完了条件未達の場合は、以下を順に実施して再確認します。
-
 1. `npm run build` を再実行
 2. ブラウザをハードリロード
-3. `maxReadPoints` / `maxPoints` を減らして再確認
-4. それでも失敗する場合はブラウザコンソールのエラーを確認し、`examples/sample_las_top_view.html` を修正
-5. 修正後に再度 1 へ戻る
+3. 依然として重い場合は `chunkPoints` / `maxReadPoints` / `maxPoints` を調整
+4. ブラウザコンソールを確認し、`examples/sample_las_top_view.html` を修正
+5. 修正後に 1 へ戻る
 
 ## 8. トラブルシュート
 
-- `EAI_AGAIN` などの npm ネットワークエラー:
-  - 通信可能な環境で `npm install` を再試行
-- 読み込みが遅い:
-  - `maxReadPoints` を小さくする（例: `2000000`）
-- 画面が点で埋まり過ぎる / 見づらい:
-  - `pointSize` を `0.005` などへ調整
+- `EADDRINUSE: 1234`
+  - 既存プロセスを停止して再起動
+- 読み込みが遅い / メモリ負荷が高い
+  - `chunkPoints` を小さくする
+  - `maxReadPoints` / `maxPoints` に上限を設定する
+- 画面が見づらい
+  - `pointSize` を調整する
 
 ## 9. 関連ファイル
 
 - `examples/sample_las_top_view.html`
+- `docs/adr/0001-las-full-rendering.md`
 - `examples/page.json`
 - `examples/github.html`
