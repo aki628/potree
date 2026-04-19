@@ -65,7 +65,21 @@ npm start
 - `chunkPoints`: チャンク点数（大きいほどオブジェクト数は減るがメモリ圧が上がる）
 - `pointSize`: 点サイズ
 
-負荷を抑えたい場合の例:
+### 5.4 `sample.las` の Classification 付与（初回のみ）
+
+`data/sample.las` の classification が単一（例: 全 0）の場合は、以下で付与します。
+
+```bash
+python3 scripts/backfill_sample_las_classification.py --path data/sample.las --chunk-points 500000
+```
+
+処理後に class `2-6` が出ていることを確認します。
+
+```bash
+python3 scripts/backfill_sample_las_classification.py --path data/sample.las --dry-run
+```
+
+負荷を抑えたい場合の表示URL例:
 
 ```text
 http://localhost:1234/examples/sample_las_top_view.html?maxPoints=3000000&maxReadPoints=3000000&chunkPoints=500000&pointSize=0.015
@@ -75,35 +89,39 @@ http://localhost:1234/examples/sample_las_top_view.html?maxPoints=3000000&maxRea
 
 以下をすべて満たしたら完了です。
 
-1. `data/sample.las` をレンダリングできること
+1. `data/sample.las` の classification が複数クラス（少なくとも class `2-6`）になっていること
+- 判定方法: `scripts/backfill_sample_las_classification.py --dry-run` の Histogram で class `2-6` に点数がある。
+
+2. `data/sample.las` をレンダリングできること
 - 判定方法: 左上ステータスが `Completed` になる。
 
-2. ラベルごとに色分け表示されること
+3. ラベルごとに色分け表示されること
 - 判定方法: 同じラベルの点が同色で描画される。
 
-3. ラベルごとの表示/非表示を切り替えられること
+4. ラベルごとの表示/非表示を切り替えられること
 - 判定方法: 右上 Labels パネルのチェックボックスで対象ラベルが消える/再表示される。
 
-4. ラベル色を UI で変更できること
+5. ラベル色を UI で変更できること
 - 判定方法: ラベル行の色ボタンをクリックし、選択色が即時描画に反映される。
 
-5. 自作の平面と上記点群を同時表示できること
+6. 自作の平面と上記点群を同時表示できること
 - 判定方法: 半透明平面（`custom_base_plane`）が表示される。
 
-6. 上面表示（トップビュー）にできること
+7. 上面表示（トップビュー）にできること
 - 判定方法: 初期表示で上面視点になり、`Top View` で戻せる。
 
-7. 全点モードで `seen==rendered` が一致すること
+8. 全点モードで `seen==rendered` が一致すること
 - 判定方法: `maxPoints=0&maxReadPoints=0` で `seen==rendered: yes` が表示される。
 
 ## 7. 完了条件を満たすまでの修正ループ
 
-1. `npm run build` を再実行
-2. ブラウザをハードリロード
-3. 依然として重い場合は `chunkPoints` / `maxReadPoints` / `maxPoints` を調整
-4. ラベル定義を変更したい場合は `data/sample_labels.xml` を修正して再読込
-5. ブラウザコンソールを確認し、`examples/sample_las_top_view.html` を修正
-6. 修正後に 1 へ戻る
+1. `python3 scripts/backfill_sample_las_classification.py --path data/sample.las` を実行
+2. `npm run build` を再実行
+3. ブラウザをハードリロード
+4. 依然として重い場合は `chunkPoints` / `maxReadPoints` / `maxPoints` を調整
+5. ラベル定義を変更したい場合は `data/sample_labels.xml` を修正して再読込
+6. ブラウザコンソールを確認し、`examples/sample_las_top_view.html` を修正
+7. 修正後に 1 へ戻る
 
 ## 8. トラブルシュート
 
@@ -115,6 +133,9 @@ http://localhost:1234/examples/sample_las_top_view.html?maxPoints=3000000&maxRea
 - ラベル色が期待通りでない
   - `data/sample_labels.xml` の `color="#RRGGBB"` を確認
   - XML 読み込み失敗時はフォールバック色になる
+- class が 1 種類のまま
+  - `scripts/backfill_sample_las_classification.py` を再実行する
+  - 対象ファイルが `data/sample.las` であることを確認する
 - 画面が見づらい
   - `pointSize` を調整する
 
@@ -122,7 +143,9 @@ http://localhost:1234/examples/sample_las_top_view.html?maxPoints=3000000&maxRea
 
 - `examples/sample_las_top_view.html`
 - `data/sample_labels.xml`
+- `scripts/backfill_sample_las_classification.py`
 - `docs/adr/0001-las-full-rendering.md`
 - `docs/adr/0002-label-color-map-and-visibility.md`
+- `docs/adr/0003-sample-las-classification-backfill.md`
 - `examples/page.json`
 - `examples/github.html`
