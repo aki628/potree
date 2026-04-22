@@ -1085,8 +1085,35 @@ export class Sidebar{
 
 	initClassificationList(){
 		let elClassificationList = $('#classificationList');
+		const childListID = "classificationLabelList";
+		const childToggleID = "toggleClassificationChildren";
+		let expanded = false;
 
-		let addClassificationItem = (code, name) => {
+		const syncExpandedState = () => {
+			const icon = expanded ? "&#9662;" : "&#9656;";
+			elClassificationList.find(`#${childToggleID}`).html(icon);
+			elClassificationList.find(`#${childListID}`).toggle(expanded);
+		};
+
+		const syncParentToggleState = () => {
+			let numVisible = 0;
+			let numItems = 0;
+			for(const key of Object.keys(this.viewer.classifications)){
+				if(this.viewer.classifications[key].visible){
+					numVisible++;
+				}
+				numItems++;
+			}
+
+			const allVisible = numItems > 0 && numVisible === numItems;
+			const someVisible = numVisible > 0;
+
+			let elToggle = elClassificationList.find("#toggleClassificationFilters");
+			elToggle.prop("checked", allVisible);
+			elToggle.prop("indeterminate", someVisible && !allVisible);
+		};
+
+		let addClassificationItem = (container, code, name) => {
 			const classification = this.viewer.classifications[code];
 			const inputID = 'chkClassification_' + code;
 			const colorPickerID = 'colorPickerClassification_' + code;
@@ -1103,7 +1130,7 @@ export class Sidebar{
 				</li>
 			`);
 
-			const elInput = element.find('input');
+			const elInput = element.find(`#${inputID}`);
 			const elColorPicker = element.find(`#${colorPickerID}`);
 
 			elInput.click(event => {
@@ -1133,29 +1160,49 @@ export class Sidebar{
 				}
 			});
 
-			elClassificationList.append(element);
+			container.append(element);
 		};
 
-		const addToggleAllButton = () => { // toggle all button
+		const addHierarchyRoot = () => {
 			const element = $(`
 				<li>
-					<label style="whitespace: nowrap">
-						<input id="toggleClassificationFilters" type="checkbox" checked/>
-						<span>show/hide all</span>
-					</label>
+					<div style="display: flex; align-items: center; gap: 4px;">
+						<button id="${childToggleID}" type="button" style="border: none; background: transparent; cursor: pointer; width: 20px;">&#9656;</button>
+						<label style="whitespace: nowrap; display: flex; align-items: center; flex-grow: 1;">
+							<input id="toggleClassificationFilters" type="checkbox" checked/>
+							<span style="flex-grow: 1">Classification</span>
+						</label>
+					</div>
 				</li>
 			`);
 
-			let elInput = element.find('input');
+			const elInput = element.find('#toggleClassificationFilters');
+			const elToggle = element.find(`#${childToggleID}`);
 
 			elInput.click(event => {
-				this.viewer.toggleAllClassificationsVisibility();
+				for(const key of Object.keys(this.viewer.classifications)){
+					this.viewer.setClassificationVisibility(key, event.target.checked);
+				}
+			});
+
+			elToggle.click(() => {
+				expanded = !expanded;
+				syncExpandedState();
 			});
 
 			elClassificationList.append(element);
-		}
+		};
 
-		const addInvertButton = () => { 
+		const addChildListContainer = () => {
+			const element = $(`
+				<li>
+					<ul id="${childListID}" class="pv-menu-list" style="display: none; padding-left: 1.25em; margin: 0;"></ul>
+				</li>
+			`);
+			elClassificationList.append(element);
+		};
+
+		const addInvertButton = (container) => { 
 			const element = $(`
 				<li>
 					<input type="button" value="invert" />
@@ -1173,15 +1220,20 @@ export class Sidebar{
 				}
 			});
 
-			elClassificationList.append(element);
+			container.append(element);
 		};
 
 		const populate = () => {
-			addToggleAllButton();
+			addHierarchyRoot();
+			addChildListContainer();
+			const elChildList = elClassificationList.find(`#${childListID}`);
+
 			for (let classID in this.viewer.classifications) {
-				addClassificationItem(classID, this.viewer.classifications[classID].name);
+				addClassificationItem(elChildList, classID, this.viewer.classifications[classID].name);
 			}
-			addInvertButton();
+			addInvertButton(elChildList);
+			syncExpandedState();
+			syncParentToggleState();
 		};
 
 		populate();
@@ -1203,18 +1255,7 @@ export class Sidebar{
 			}
 
 			{ // set checked state of toggle button based on state of all other buttons
-				let numVisible = 0;
-				let numItems = 0;
-				for(const key of Object.keys(this.viewer.classifications)){
-					if(this.viewer.classifications[key].visible){
-						numVisible++;
-					}
-					numItems++;
-				}
-				const allVisible = numVisible === numItems;
-
-				let elToggle = elClassificationList.find("#toggleClassificationFilters");
-				elToggle.prop("checked", allVisible);
+				syncParentToggleState();
 			}
 		});
 	}
