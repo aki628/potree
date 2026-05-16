@@ -81,7 +81,7 @@ gulp.task('webserver', gulp.series(async function() {
 	server = connect.server({
 		host: '127.0.0.1',
 		port: 1234,
-		https: false,
+		https: true,
 	});
 }));
 
@@ -202,5 +202,4 @@ gulp.task('watch', gulp.parallel("build", "pack", "webserver", async function() 
 	watch(watchlist, gulp.series("build", "pack"));
 
 }));
-
 
