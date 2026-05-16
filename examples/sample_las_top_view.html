@@ -171,21 +171,8 @@
 		import * as THREE from "../libs/three.js/build/three.module.js";
 
 		const params = new URLSearchParams(window.location.search);
-		const samplePath = params.get("file") || "../data/sample.las";
-		const labelMapPath = params.get("labelMap") || "../data/sample_labels.xml";
-		const maxPointsParam = Number(params.get("maxPoints") || "0");
-		const maxReadPointsParam = Number(params.get("maxReadPoints") || "0");
-		const pointSize = Number(params.get("pointSize") || "0.015");
-		const chunkPoints = Math.max(50000, Number(params.get("chunkPoints") || "1000000"));
-
-		const pointLimit = Number.isFinite(maxPointsParam) && maxPointsParam > 0
-			? Math.floor(maxPointsParam)
-			: 0;
-		const readLimit = Number.isFinite(maxReadPointsParam) && maxReadPointsParam > 0
-			? Math.floor(maxReadPointsParam)
-			: 0;
-		const fullRenderMode = pointLimit === 0;
-		const fullReadMode = readLimit === 0;
+		const defaultSamplePath = "../data/sample.las";
+		const defaultLabelMapPath = "../data/sample_labels.xml";
 
 		const statusText = document.getElementById("status_text");
 		const topViewButton = document.getElementById("btn_top_view");
@@ -207,6 +194,88 @@
 			message.className = "label_message";
 			message.textContent = text;
 			labelLegendBody.appendChild(message);
+		}
+
+		function escapeHTML(value){
+			return String(value).replace(/[&<>"']/g, character => ({
+				"&": "&amp;",
+				"<": "&lt;",
+				">": "&gt;",
+				'"': "&quot;",
+				"'": "&#39;"
+			}[character]));
+		}
+
+		function parseBoundedQueryNumber(name, fallback, min, max, integer = false){
+			const rawValue = params.get(name);
+			if (rawValue === null || rawValue.trim() === "") {
+				return fallback;
+			}
+
+			const parsed = Number(rawValue);
+			if (!Number.isFinite(parsed)) {
+				return fallback;
+			}
+
+			const clamped = Math.min(max, Math.max(min, parsed));
+			return integer ? Math.floor(clamped) : clamped;
+		}
+
+		function resolveLocalDataPath(name, fallback, extension){
+			const rawValue = params.get(name);
+			const candidate = rawValue === null || rawValue.trim() === "" ? fallback : rawValue.trim();
+			let url;
+
+			try {
+				url = new URL(candidate, window.location.href);
+			} catch (error) {
+				throw new Error(`${name} is not a valid local path.`);
+			}
+
+			if (url.origin !== window.location.origin) {
+				throw new Error(`${name} must stay on ${window.location.origin}. External URLs are not allowed.`);
+			}
+
+			if (!url.pathname.startsWith("/data/")) {
+				throw new Error(`${name} must resolve under /data/.`);
+			}
+
+			if (!url.pathname.toLowerCase().endsWith(extension)) {
+				throw new Error(`${name} must end with ${extension}.`);
+			}
+
+			if (url.search || url.hash) {
+				throw new Error(`${name} must not include query strings or fragments.`);
+			}
+
+			return url.pathname;
+		}
+
+		let samplePath;
+		let labelMapPath;
+		let pointLimit;
+		let readLimit;
+		let pointSize;
+		let chunkPoints;
+		let fullRenderMode;
+		let fullReadMode;
+
+		try {
+			samplePath = resolveLocalDataPath("file", defaultSamplePath, ".las");
+			labelMapPath = resolveLocalDataPath("labelMap", defaultLabelMapPath, ".xml");
+
+			pointLimit = parseBoundedQueryNumber("maxPoints", 0, 0, 20_000_000, true);
+			readLimit = parseBoundedQueryNumber("maxReadPoints", 0, 0, 200_000_000, true);
+			pointSize = parseBoundedQueryNumber("pointSize", 0.015, 0.001, 1);
+			chunkPoints = parseBoundedQueryNumber("chunkPoints", 1_000_000, 50_000, 2_000_000, true);
+
+			fullRenderMode = pointLimit === 0;
+			fullReadMode = readLimit === 0;
+		} catch (error) {
+			setStatus(`Invalid query: ${error.message}`);
+			setLabelPanelMeta("Query validation failed.");
+			setLabelLegendMessage("Sample loading was stopped before fetching data.");
+			throw error;
 		}
 
 		function concatUint8(left, right){
@@ -872,8 +941,8 @@
 		viewer.loadSettingsFromURL();
 
 		viewer.setDescription(
-			`Rendering ${samplePath}<br>` +
-			`labelMap=${labelMapPath}<br>` +
+			`Rendering ${escapeHTML(samplePath)}<br>` +
+			`labelMap=${escapeHTML(labelMapPath)}<br>` +
 			`maxPoints=${pointLimit > 0 ? fmt.format(pointLimit) : "all"}, ` +
 			`maxReadPoints=${readLimit > 0 ? fmt.format(readLimit) : "all"}, ` +
 			`chunkPoints=${fmt.format(chunkPoints)}`
