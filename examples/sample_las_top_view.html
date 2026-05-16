@@ -31,6 +31,21 @@
 			cursor: pointer;
 		}
 
+		#local_file_controls {
+			display: grid;
+			gap: 4px;
+			margin-top: 8px;
+		}
+
+		#local_file_label {
+			font-weight: 700;
+		}
+
+		#las_file_input {
+			max-width: 100%;
+			color: #fff;
+		}
+
 		#label_panel {
 			position: absolute;
 			top: 12px;
@@ -157,6 +172,10 @@
 	<div id="status_panel">
 		<div id="status_text">Initializing...</div>
 		<button id="btn_top_view" type="button">Top View</button>
+		<div id="local_file_controls">
+			<label id="local_file_label" for="las_file_input">Local LAS file</label>
+			<input id="las_file_input" type="file" accept=".las,.LAS">
+		</div>
 	</div>
 
 	<div id="label_panel">
@@ -176,6 +195,7 @@
 
 		const statusText = document.getElementById("status_text");
 		const topViewButton = document.getElementById("btn_top_view");
+		const lasFileInput = document.getElementById("las_file_input");
 		const labelPanelMeta = document.getElementById("label_panel_meta");
 		const labelLegendBody = document.getElementById("label_legend_body");
 		const fmt = new Intl.NumberFormat("en-US");
@@ -773,19 +793,8 @@
 			}
 		}
 
-		async function loadLasPoints(url, options){
+		async function loadLasPointStream(reader, totalBytes, sourceLabel, options){
 			const {pointLimit, readLimit, pointSize, chunkPoints, labelDefinitions} = options;
-
-			const response = await fetch(url);
-			if (!response.ok) {
-				throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
-			}
-			if (!response.body) {
-				throw new Error("Streaming fetch is not available in this browser.");
-			}
-
-			const totalBytes = Number(response.headers.get("content-length") || "0");
-			const reader = response.body.getReader();
 
 			let pending = new Uint8Array(0);
 			let bytesRead = 0;
@@ -821,7 +830,7 @@
 					? `capped at ${fmt.format(pointLimit)}`
 					: "full render";
 				setStatus(
-					`Reading ${url}${pct}\n` +
+					`Reading ${sourceLabel}${pct}\n` +
 					`${headerInfo}\n` +
 					`seen: ${fmt.format(seenVertices)}${declaredInfo}\n` +
 					`rendered: ${fmt.format(pointCollector.getBufferedPoints())} (${renderMode})\n` +
@@ -929,8 +938,34 @@
 				renderedPoints: finalResult.renderedPoints,
 				chunkCount: finalResult.chunkCount,
 				fullyReadToEof: done === false,
-				labels: finalResult.labelEntries
+				labels: finalResult.labelEntries,
+				sourceLabel
 			};
+		}
+
+		async function loadLasPoints(url, options){
+			const response = await fetch(url);
+			if (!response.ok) {
+				throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
+			}
+			if (!response.body) {
+				throw new Error("Streaming fetch is not available in this browser.");
+			}
+
+			const totalBytes = Number(response.headers.get("content-length") || "0");
+			return loadLasPointStream(response.body.getReader(), totalBytes, url, options);
+		}
+
+		async function loadLasPointsFromFile(file, options){
+			if (!file || typeof file.name !== "string" || !file.name.toLowerCase().endsWith(".las")) {
+				throw new Error("Select a local .las file.");
+			}
+			if (!file.stream) {
+				throw new Error("File streaming is not available in this browser.");
+			}
+
+			const sourceLabel = `local file: ${file.name}`;
+			return loadLasPointStream(file.stream().getReader(), file.size, sourceLabel, options);
 		}
 
 		window.viewer = new Potree.Viewer(document.getElementById("potree_render_area"));
@@ -940,13 +975,17 @@
 		viewer.setBackground("skybox");
 		viewer.loadSettingsFromURL();
 
-		viewer.setDescription(
-			`Rendering ${escapeHTML(samplePath)}<br>` +
-			`labelMap=${escapeHTML(labelMapPath)}<br>` +
-			`maxPoints=${pointLimit > 0 ? fmt.format(pointLimit) : "all"}, ` +
-			`maxReadPoints=${readLimit > 0 ? fmt.format(readLimit) : "all"}, ` +
-			`chunkPoints=${fmt.format(chunkPoints)}`
-		);
+		function setViewerDescription(sourceLabel){
+			viewer.setDescription(
+				`Rendering ${escapeHTML(sourceLabel)}<br>` +
+				`labelMap=${escapeHTML(labelMapPath)}<br>` +
+				`maxPoints=${pointLimit > 0 ? fmt.format(pointLimit) : "all"}, ` +
+				`maxReadPoints=${readLimit > 0 ? fmt.format(readLimit) : "all"}, ` +
+				`chunkPoints=${fmt.format(chunkPoints)}`
+			);
+		}
+
+		setViewerDescription(samplePath);
 
 		viewer.loadGUI(() => {
 			viewer.setLanguage("en");
@@ -962,46 +1001,75 @@
 		viewer.scene.scene.add(directional);
 
 		let latestBounds = null;
+		let loadedPointsGroup = null;
+		let loadedBasePlane = null;
+		let currentLabelMapResult = {
+			definitions: new Map(),
+			loadedFromXml: false,
+			errorMessage: "Label map has not loaded yet.",
+			url: labelMapPath
+		};
+		let activeLoadToken = 0;
+		let currentSourceLabel = samplePath;
 
-		topViewButton.addEventListener("click", () => {
-			if (latestBounds) {
-				applyTopView(viewer, latestBounds);
-			}
-		});
+		function disposeSceneObject(object){
+			const geometries = new Set();
+			const materials = new Set();
 
-		try {
-			setLabelPanelMeta(`Loading: ${labelMapPath}`);
-			setLabelLegendMessage("Preparing label map...");
-			const labelMapResult = await loadLabelDefinitions(labelMapPath);
+			object.traverse(node => {
+				if (node.geometry) {
+					geometries.add(node.geometry);
+				}
 
-			if (labelMapResult.loadedFromXml) {
-				setLabelPanelMeta(
-					`source: xml\n` +
-					`path: ${labelMapResult.url}\n` +
-					`definitions: ${fmt.format(labelMapResult.definitions.size)}`
-				);
-			} else {
-				setLabelPanelMeta(
-					`source: fallback\n` +
-					`path: ${labelMapResult.url}\n` +
-					`error: ${labelMapResult.errorMessage || "none"}`
-				);
-			}
-
-			setStatus("Loading sample LAS...");
-
-			const result = await loadLasPoints(samplePath, {
-				pointLimit,
-				readLimit,
-				pointSize,
-				chunkPoints,
-				labelDefinitions: labelMapResult.definitions
+				if (Array.isArray(node.material)) {
+					for (const material of node.material) {
+						if (material) {
+							materials.add(material);
+						}
+					}
+				} else if (node.material) {
+					materials.add(node.material);
+				}
 			});
 
-			viewer.scene.scene.add(result.pointsGroup);
+			for (const geometry of geometries) {
+				geometry.dispose();
+			}
+			for (const material of materials) {
+				material.dispose();
+			}
+		}
 
-			const basePlane = createPlane(result.bounds);
-			viewer.scene.scene.add(basePlane);
+		function clearLoadedSceneObjects(){
+			if (loadedPointsGroup) {
+				viewer.scene.scene.remove(loadedPointsGroup);
+				disposeSceneObject(loadedPointsGroup);
+				loadedPointsGroup = null;
+			}
+
+			if (loadedBasePlane) {
+				viewer.scene.scene.remove(loadedBasePlane);
+				disposeSceneObject(loadedBasePlane);
+				loadedBasePlane = null;
+			}
+
+			latestBounds = null;
+		}
+
+		function createLabelDefinitionsForLoad(){
+			return new Map(currentLabelMapResult ? currentLabelMapResult.definitions : []);
+		}
+
+		function renderLoadedLasResult(result, labelMapResult){
+			clearLoadedSceneObjects();
+			currentSourceLabel = result.sourceLabel;
+			setViewerDescription(currentSourceLabel);
+
+			viewer.scene.scene.add(result.pointsGroup);
+			loadedPointsGroup = result.pointsGroup;
+
+			loadedBasePlane = createPlane(result.bounds);
+			viewer.scene.scene.add(loadedBasePlane);
 
 			latestBounds = result.bounds;
 			applyTopView(viewer, result.bounds);
@@ -1027,6 +1095,7 @@
 
 			setStatus(
 				`Completed\n` +
+				`source: ${result.sourceLabel}\n` +
 				`LAS ${result.header.version} / format ${result.header.pointFormat} / record ${result.header.pointRecordLength}\n` +
 				`seen: ${fmt.format(result.seenVertices)} / header ${fmt.format(result.header.pointCount)}\n` +
 				`rendered: ${fmt.format(result.renderedPoints)} / chunks ${fmt.format(result.chunkCount)}\n` +
@@ -1036,6 +1105,89 @@
 				(headerMatchesSeen === null ? "" : ` / header==seen: ${headerMatchesSeen ? "yes" : "no"}`) +
 				`\n${ranges.join(" | ")}`
 			);
+		}
+
+		topViewButton.addEventListener("click", () => {
+			if (latestBounds) {
+				applyTopView(viewer, latestBounds);
+			}
+		});
+
+		lasFileInput.addEventListener("change", async () => {
+			const file = lasFileInput.files && lasFileInput.files[0];
+			if (!file) {
+				return;
+			}
+
+			if (!file.name.toLowerCase().endsWith(".las")) {
+				setStatus("Local file rejected: select a .las file.");
+				lasFileInput.value = "";
+				return;
+			}
+
+			const loadToken = ++activeLoadToken;
+			const sourceLabel = `local file: ${file.name} (${fmt.format(file.size)} bytes)`;
+			setViewerDescription(sourceLabel);
+			setStatus(`Loading ${sourceLabel}...`);
+
+			try {
+				const result = await loadLasPointsFromFile(file, {
+					pointLimit,
+					readLimit,
+					pointSize,
+					chunkPoints,
+					labelDefinitions: createLabelDefinitionsForLoad()
+				});
+
+				if (loadToken !== activeLoadToken) {
+					disposeSceneObject(result.pointsGroup);
+					return;
+				}
+
+				renderLoadedLasResult(result, currentLabelMapResult);
+			} catch (error) {
+				console.error(error);
+				setViewerDescription(currentSourceLabel);
+				setStatus(`Local file load failed: ${error.message}`);
+			}
+		});
+
+		try {
+			setLabelPanelMeta(`Loading: ${labelMapPath}`);
+			setLabelLegendMessage("Preparing label map...");
+			currentLabelMapResult = await loadLabelDefinitions(labelMapPath);
+
+			if (currentLabelMapResult.loadedFromXml) {
+				setLabelPanelMeta(
+					`source: xml\n` +
+					`path: ${currentLabelMapResult.url}\n` +
+					`definitions: ${fmt.format(currentLabelMapResult.definitions.size)}`
+				);
+			} else {
+				setLabelPanelMeta(
+					`source: fallback\n` +
+					`path: ${currentLabelMapResult.url}\n` +
+					`error: ${currentLabelMapResult.errorMessage || "none"}`
+				);
+			}
+
+			setStatus("Loading sample LAS...");
+			setViewerDescription(samplePath);
+			const defaultLoadToken = ++activeLoadToken;
+
+			const result = await loadLasPoints(samplePath, {
+				pointLimit,
+				readLimit,
+				pointSize,
+				chunkPoints,
+				labelDefinitions: createLabelDefinitionsForLoad()
+			});
+
+			if (defaultLoadToken === activeLoadToken) {
+				renderLoadedLasResult(result, currentLabelMapResult);
+			} else {
+				disposeSceneObject(result.pointsGroup);
+			}
 		} catch (error) {
 			console.error(error);
 			setStatus(`Failed: ${error.message}`);
