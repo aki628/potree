@@ -985,7 +985,7 @@
 			);
 		}
 
-		setViewerDescription(samplePath);
+		setViewerDescription("No LAS file selected");
 
 		viewer.loadGUI(() => {
 			viewer.setLanguage("en");
@@ -1010,7 +1010,7 @@
 			url: labelMapPath
 		};
 		let activeLoadToken = 0;
-		let currentSourceLabel = samplePath;
+		let currentSourceLabel = "No LAS file selected";
 
 		function disposeSceneObject(object){
 			const geometries = new Set();
@@ -1171,23 +1171,9 @@
 				);
 			}
 
-			setStatus("Loading sample LAS...");
-			setViewerDescription(samplePath);
-			const defaultLoadToken = ++activeLoadToken;
-
-			const result = await loadLasPoints(samplePath, {
-				pointLimit,
-				readLimit,
-				pointSize,
-				chunkPoints,
-				labelDefinitions: createLabelDefinitionsForLoad()
-			});
-
-			if (defaultLoadToken === activeLoadToken) {
-				renderLoadedLasResult(result, currentLabelMapResult);
-			} else {
-				disposeSceneObject(result.pointsGroup);
-			}
+			setViewerDescription(currentSourceLabel);
+			setStatus("Select a local .las file to render.");
+			setLabelLegendMessage("No point cloud loaded. Select a local .las file.");
 		} catch (error) {
 			console.error(error);
 			setStatus(`Failed: ${error.message}`);
