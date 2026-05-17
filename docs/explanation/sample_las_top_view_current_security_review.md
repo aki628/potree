@@ -1,10 +1,16 @@
 # `examples/sample_las_top_view.html` 操作時のセキュリティ確認
 
-調査日: 2026-05-16
+調査日: 2026-05-17
 
 ## 結論
 
 現状の `examples/sample_las_top_view.html` を通常どおりローカルPC上で操作する範囲では、選択したローカル `.las` 点群ファイルが自動で外部へ送信されたり、外部から直接アクセスできるようになったりする実装にはなっていません。
+
+この文書での「通常どおり」は、次を満たす運用です。
+
+- `npm start` のサーバを `127.0.0.1:1234` のローカル用途で使う。
+- Docker / WSL portproxy / SSH forwarding / Codespaces public port / リバースプロキシなどで `1234` を外部公開しない。
+- 出所が分かっている `.las` / `.xml` だけを読み込む。
 
 主な理由は次です。
 
@@ -20,6 +26,26 @@
 
 1. `npm start` の `1234` ポートを Docker / WSL portproxy / SSH port forwarding などで外部公開しない。
 2. 出所不明または細工された `.las` / `.xml` を読み込まない。
+
+## 現在のコード確認結果
+
+2026-05-17 時点の静的確認では、次の状態です。
+
+```text
+gulpfile.js: host: '127.0.0.1'
+examples/sample_las_top_view.html: file.stream().getReader()
+examples/sample_las_top_view.html: fetch(url) はラベルXMLと既存の /data/*.las URL loader のみ
+examples/sample_las_top_view.html: URL.createObjectURL なし
+examples/sample_las_top_view.html: WebSocket なし
+examples/sample_las_top_view.html: navigator.sendBeacon なし
+examples/sample_las_top_view.html: XMLHttpRequest なし
+```
+
+補足:
+
+- `loadLasPoints(url, options)` には `fetch(url)` が残っていますが、ローカルファイル選択時には使われません。
+- ローカルファイル選択時は `loadLasPointsFromFile(file, options)` が使われ、`file.stream().getReader()` で読みます。
+- `file=` / `labelMap=` は `resolveLocalDataPath(...)` で同一オリジンかつ `/data/` 配下に制限されています。
 
 ## 確認対象
 
@@ -81,6 +107,18 @@ async function loadLasPointsFromFile(file, options){
 
 現状の実装では、選択したローカル `.las` が外部へ送信される経路は見つかりません。
 
+ローカル `.las` の読み込み経路は次です。
+
+```text
+ユーザーが input[type=file] で .las を選択
+  -> Browser File API の File object
+  -> file.stream().getReader()
+  -> loadLasPointStream(...)
+  -> Three.js geometry としてブラウザ内に描画
+```
+
+この経路にネットワーク送信はありません。
+
 確認した不存在の処理:
 
 - `fetch(file)` のような処理
@@ -106,6 +144,8 @@ async function loadLasPointsFromFile(file, options){
 ?labelMap=https://example.com/labels.xml
 ```
 
+通常のラベルXML取得は、同じローカル開発サーバ上の `/data/*.xml` へのGETです。これは外部送信ではなく、ローカルHTMLが同じローカルサーバから設定ファイルを読む経路です。
+
 ## 外部からアクセスされるリスク
 
 `gulpfile.js` の開発サーバ設定は現在次です。
@@ -129,6 +169,8 @@ connect.server({
 - ルータやファイアウォールで `1234` を公開する
 
 この場合でも、ファイル選択で選んだローカル `.las` はサーバに置かれないため、外部から直接取得できません。一方で、リポジトリ配下で静的配信されるファイルは見える可能性があります。
+
+つまり、外部アクセスリスクは「選択したローカル `.las`」よりも、「`1234` を外部公開した場合にリポジトリ配下の静的ファイルが見えること」にあります。
 
 ## HTTPSについて
 
